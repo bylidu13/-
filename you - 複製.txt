@@ -311,43 +311,56 @@ local function CreateToggle(parent, text, globalVar)
 end
 
 -- 2. 手機專用獨立 Slider (解決一起動的問題)
-local function CreateSlider(parent, text, min, max, default, callback)
+local function CreateSlider(parent, text, min, max, globalVar, callback)
     local sliderFrame = Instance.new("Frame", parent)
-    sliderFrame.Size = UDim2.new(1, -5, 0, 50)
+    sliderFrame.Size = UDim2.new(1, -5, 0, 60)
     sliderFrame.BackgroundTransparency = 1
 
     local label = Instance.new("TextLabel", sliderFrame)
-    label.Size = UDim2.new(1, 0, 0, 20)
-    label.Text = text .. ": " .. default
+    label.Size = UDim2.new(1, 0, 0, 25)
+    label.Text = text
     label.TextColor3 = THEME.Text
-    label.BackgroundTransparency = 1
+    label.Font = "GothamBold"
     label.TextXAlignment = "Left"
+    label.BackgroundTransparency = 1
+
+    local box = Instance.new("TextLabel", sliderFrame)
+    box.Size = UDim2.new(0, 50, 0, 20)
+    box.Position = UDim2.new(1, -55, 0, 0)
+    box.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+    box.TextColor3 = Color3.new(1, 1, 1)
+    box.Text = tostring(_G[globalVar])
+    Instance.new("UICorner", box)
 
     local bar = Instance.new("Frame", sliderFrame)
-    bar.Size = UDim2.new(1, -10, 0, 6)
-    bar.Position = UDim2.new(0, 5, 0, 30)
+    bar.Size = UDim2.new(1, -20, 0, 6)
+    bar.Position = UDim2.new(0, 10, 0, 45)
     bar.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
     Instance.new("UICorner", bar)
 
-    local fill = Instance.new("Frame", bar)
-    fill.Size = UDim2.new((default-min)/(max-min), 0, 1, 0)
-    fill.BackgroundColor3 = THEME.Main
-    Instance.new("UICorner", fill)
+    local handle = Instance.new("TextButton", bar)
+    handle.Size = UDim2.new(0, 30, 0, 18)
+    handle.AnchorPoint = Vector2.new(0.5, 0.5)
+    handle.Position = UDim2.new((_G[globalVar]-min)/(max-min), 0, 0.5, 0)
+    handle.BackgroundColor3 = Color3.new(1, 1, 1)
+    handle.Text = ""
+    Instance.new("UICorner", handle)
 
-    local isDragging = false -- 關鍵：每個滑桿局部獨立
+    local isDragging = false -- 局部變數，解決連動
 
     local function update(input)
-        local pos = math.clamp((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
-        fill.Size = UDim2.new(pos, 0, 1, 0)
-        local val = math.floor(min + (max - min) * pos)
-        label.Text = text .. ": " .. val
-        callback(val)
+        local mouseX = input.Position.X
+        local relative = math.clamp((mouseX - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+        local val = min + (relative * (max - min))
+        _G[globalVar] = val
+        handle.Position = UDim2.new(relative, 0, 0.5, 0)
+        box.Text = string.format("%.1f", val)
+        if callback then callback(val) end
     end
 
-    bar.InputBegan:Connect(function(input)
+    handle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             isDragging = true
-            update(input)
         end
     end)
 
