@@ -334,8 +334,7 @@ local function CreateSlider(parent, text, min, max, default, callback)
     fill.BackgroundColor3 = THEME.Main
     Instance.new("UICorner", fill)
 
-    -- 每個滑桿獨立的拖拽變數
-    local isDragging = false
+    local isDragging = false -- 關鍵：每個滑桿局部獨立
 
     local function update(input)
         local pos = math.clamp((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
