@@ -310,6 +310,61 @@ local function CreateToggle(parent, text, globalVar)
     end)
 end
 
+-- 2. 手機專用獨立 Slider (解決一起動的問題)
+local function CreateSlider(parent, text, min, max, default, callback)
+    local sliderFrame = Instance.new("Frame", parent)
+    sliderFrame.Size = UDim2.new(1, -5, 0, 50)
+    sliderFrame.BackgroundTransparency = 1
+
+    local label = Instance.new("TextLabel", sliderFrame)
+    label.Size = UDim2.new(1, 0, 0, 20)
+    label.Text = text .. ": " .. default
+    label.TextColor3 = THEME.Text
+    label.BackgroundTransparency = 1
+    label.TextXAlignment = "Left"
+
+    local bar = Instance.new("Frame", sliderFrame)
+    bar.Size = UDim2.new(1, -10, 0, 6)
+    bar.Position = UDim2.new(0, 5, 0, 30)
+    bar.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    Instance.new("UICorner", bar)
+
+    local fill = Instance.new("Frame", bar)
+    fill.Size = UDim2.new((default-min)/(max-min), 0, 1, 0)
+    fill.BackgroundColor3 = THEME.Main
+    Instance.new("UICorner", fill)
+
+    -- 每個滑桿獨立的拖拽變數
+    local isDragging = false
+
+    local function update(input)
+        local pos = math.clamp((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+        fill.Size = UDim2.new(pos, 0, 1, 0)
+        local val = math.floor(min + (max - min) * pos)
+        label.Text = text .. ": " .. val
+        callback(val)
+    end
+
+    bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            isDragging = true
+            update(input)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            update(input)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            isDragging = false
+        end
+    end)
+end
+
 -- [分配內容]
 
 -- 功能
