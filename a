@@ -4,39 +4,9 @@
 -- ============================================================
 
 -- ============================================================
--- 配置系统
--- ============================================================
-local Config = {
-    -- 要 farming 的戒指列表（留空则 farming 所有）
-    FarmRings = {},
-    
-    -- 白名单戒指（留空则不过滤）
-    WhitelistRings = {},
-    
-    -- 白名单修饰符（留空则不过滤）
-    WhitelistModifiers = {},
-    
-    -- 锁定最小等级（低于此等级的不 farming）
-    MinGradeToLock = 0,
-    
-    -- 主账号名称
-    MainAccount = "",
-    
-    -- 小号列表
-    Alts = {},
-    
-    -- 显示状态 UI
-    ShowStatus = true,
-    
-    -- 武器偏好
-    PreferredWeapon = "Auto", -- Auto, Sword, Melee, Fruit, Lifesteal, Hyper
-}
-
--- ============================================================
 -- 工具函数
 -- ============================================================
 
--- 安全 pcall 包装
 local function safeCall(func, ...)
     local success, result = pcall(func, ...)
     if not success then
@@ -46,7 +16,6 @@ local function safeCall(func, ...)
     return result
 end
 
--- 等待条件
 local function waitFor(condition, timeout, interval)
     timeout = timeout or 30
     interval = interval or 0.1
@@ -90,58 +59,44 @@ local function getReplicatedStorage()
     return game:GetService("ReplicatedStorage")
 end
 
-local function getRunService()
-    return game:GetService("RunService")
-end
-
 -- ============================================================
 -- 武器检测系统
 -- ============================================================
 
--- 检测武器类型
 local function detectWeaponType(item)
     if not item then return "Unknown" end
     
     local name = item.Name:lower()
-    
-    -- 通过属性检测
     local weaponType = item:GetAttribute("WeaponType")
+    
     if weaponType and weaponType ~= "" then
         local wt = weaponType:lower()
-        if wt:find("sword") or wt:find("blade") then
-            return "Sword"
-        elseif wt:find("fruit") or wt:find("blox") then
-            return "Fruit"
-        elseif wt:find("lifesteal") or wt:find("life") then
-            return "Lifesteal"
-        elseif wt:find("hyper") then
-            return "Hyper"
-        elseif wt:find("melee") or wt:find("fist") then
-            return "Melee"
+        if wt:find("sword") or wt:find("blade") then return "Sword"
+        elseif wt:find("fruit") or wt:find("blox") then return "Fruit"
+        elseif wt:find("lifesteal") or wt:find("life") then return "Lifesteal"
+        elseif wt:find("hyper") then return "Hyper"
+        elseif wt:find("melee") or wt:find("fist") then return "Melee"
         end
     end
     
-    -- 通过名称检测
-    if name:find("sword") or name:find("blade") or name:find("katana") or name:find("cutlass") then
+    if name:find("sword") or name:find("blade") or name:find("katana") then
         return "Sword"
-    elseif name:find("fruit") or name:find("blox") or name:find("demon") or name:find("flame") then
+    elseif name:find("fruit") or name:find("blox") or name:find("demon") then
         return "Fruit"
-    elseif name:find("lifesteal") or name:find("life steal") or name:find("leech") or name:find("vamp") then
+    elseif name:find("lifesteal") or name:find("life steal") or name:find("leech") then
         return "Lifesteal"
-    elseif name:find("hyper") or name:find("super") or name:find("ultra") then
+    elseif name:find("hyper") or name:find("super") then
         return "Hyper"
     else
         return "Melee"
     end
 end
 
--- 获取 M1 速度
 local function getM1Speed(item)
     if not item then return 0 end
     
     local speed = item:GetAttribute("M1Speed") or item:GetAttribute("m1Speed") or 0
     if speed == 0 then
-        -- 根据武器类型估算
         local weaponType = detectWeaponType(item)
         local estimates = {
             Hyper = 2.0,
@@ -155,7 +110,6 @@ local function getM1Speed(item)
     return speed
 end
 
--- 获取背包中的所有武器
 local function getWeapons()
     local player = getPlayer()
     if not player then return {} end
@@ -173,15 +127,13 @@ local function getWeapons()
     return weapons
 end
 
--- 获取最佳武器
-local function getBestWeapon(preference)
+local function getBestWeapon()
     local weapons = getWeapons()
     if #weapons == 0 then return nil end
     
     local best = nil
     local bestScore = -1
     
-    -- 武器类型评分
     local typeScores = {
         Hyper = 100,
         Fruit = 80,
@@ -190,23 +142,12 @@ local function getBestWeapon(preference)
         Melee = 30,
     }
     
-    -- 如果有偏好，调整评分
-    if preference and preference ~= "Auto" then
-        for k in pairs(typeScores) do
-            typeScores[k] = typeScores[k] / 2
-        end
-        typeScores[preference] = typeScores[preference] * 2
-    end
-    
     for _, weapon in ipairs(weapons) do
         local weaponType = detectWeaponType(weapon)
         local m1Speed = getM1Speed(weapon)
         local typeScore = typeScores[weaponType] or 10
-        
-        -- 总评分 = M1速度 + 类型加成
         local score = m1Speed * 50 + typeScore
         
-        -- 检查是否已装备
         if weapon.Parent == getCharacter() then
             score = score + 50
         end
@@ -220,7 +161,6 @@ local function getBestWeapon(preference)
     return best
 end
 
--- 装备武器
 local function equipWeapon(weapon)
     if not weapon then return false end
     
@@ -228,27 +168,23 @@ local function equipWeapon(weapon)
     local character = getCharacter()
     if not character then return false end
     
-    -- 如果已经装备，直接返回
     if weapon.Parent == character then
         return true
     end
     
-    -- 卸下所有武器
     for _, tool in ipairs(character:GetChildren()) do
         if tool:IsA("Tool") then
             tool.Parent = player.Backpack
         end
     end
     
-    -- 装备新武器
     weapon.Parent = character
     task.wait(0.3)
     return true
 end
 
--- 切换武器
-local function switchWeapon(preference)
-    local best = getBestWeapon(preference)
+local function switchWeapon()
+    local best = getBestWeapon()
     if best then
         return equipWeapon(best)
     end
@@ -263,13 +199,11 @@ local function getEnergy()
     local character = getCharacter()
     if not character then return 0 end
     
-    -- 尝试获取 RaceEnergy
     local energy = character:FindFirstChild("RaceEnergy")
     if energy and energy.Value then
         return energy.Value
     end
     
-    -- 尝试通过 Remote 获取
     local replicatedStorage = getReplicatedStorage()
     if replicatedStorage then
         local modules = replicatedStorage:FindFirstChild("Modules")
@@ -294,7 +228,6 @@ end
 -- Pad 系统
 -- ============================================================
 
--- 查找所有 Pad
 local function findPads()
     local workspace = game:GetService("Workspace")
     local pads = {}
@@ -303,7 +236,6 @@ local function findPads()
         if obj:IsA("BasePart") then
             local name = obj.Name:lower()
             if name:find("pad") or name:find("platform") or name:find("teleport") then
-                -- 检查是否可交互
                 if obj.CanTouch ~= false then
                     table.insert(pads, obj)
                 end
@@ -314,7 +246,6 @@ local function findPads()
     return pads
 end
 
--- 找最近的 Pad
 local function findNearestPad()
     local rootPart = getHumanoidRootPart()
     if not rootPart then return nil end
@@ -331,18 +262,15 @@ local function findNearestPad()
     return pads[1]
 end
 
--- 进入 Pad
 local function enterPad(pad)
     if not pad then return false end
     
     local rootPart = getHumanoidRootPart()
     if not rootPart then return false end
     
-    -- 移动到 Pad
     rootPart.CFrame = pad.CFrame + Vector3.new(0, 3, 0)
     task.wait(0.3)
     
-    -- 尝试触发触摸
     local function fireTouch(part)
         if firetouchinterest then
             firetouchinterest(rootPart, part, 0)
@@ -351,7 +279,6 @@ local function enterPad(pad)
         end
     end
     
-    -- 触发所有子部件
     for _, part in ipairs(pad:GetDescendants()) do
         if part:IsA("BasePart") then
             pcall(fireTouch, part)
@@ -369,18 +296,15 @@ local function isInDungeon()
     local character = getCharacter()
     if not character then return false end
     
-    -- 检查是否有地牢标记
     if character:FindFirstChild("DungeonLua") then
         return true
     end
     
-    -- 检查 workspace
     local workspace = game:GetService("Workspace")
     if workspace:FindFirstChild("Dungeon") then
         return true
     end
     
-    -- 检查是否有敌人
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("BasePart") and obj.Name:lower():find("enemy") then
             return true
@@ -390,7 +314,6 @@ local function isInDungeon()
     return false
 end
 
--- 等待地牢开始
 local function waitForDungeonStart(timeout)
     timeout = timeout or 30
     return waitFor(function()
@@ -402,7 +325,6 @@ end
 -- 敌人系统
 -- ============================================================
 
--- 查找敌人
 local function findEnemies()
     local workspace = game:GetService("Workspace")
     local enemies = {}
@@ -430,7 +352,6 @@ local function findEnemies()
     return enemies
 end
 
--- 找最近的敌人
 local function findNearestEnemy()
     local rootPart = getHumanoidRootPart()
     if not rootPart then return nil end
@@ -447,7 +368,6 @@ local function findNearestEnemy()
     return enemies[1]
 end
 
--- 攻击敌人
 local function attackEnemy(enemyData)
     if not enemyData then return false end
     
@@ -458,28 +378,23 @@ local function attackEnemy(enemyData)
     local enemyPart = enemyData.Part
     if not enemyPart then return false end
     
-    -- 面向敌人
     local direction = (enemyPart.Position - rootPart.Position).Unit
     rootPart.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + direction * 10)
     
-    -- 发送攻击事件
     local replicatedStorage = getReplicatedStorage()
     if replicatedStorage then
         local remotes = replicatedStorage:FindFirstChild("Remotes")
         if remotes then
-            -- RegisterHit
             local registerHit = remotes:FindFirstChild("RE/RegisterHit")
             if registerHit and registerHit.FireServer then
                 pcall(registerHit.FireServer, registerHit, enemyPart)
             end
             
-            -- RegisterAttack
             local registerAttack = remotes:FindFirstChild("RE/RegisterAttack")
             if registerAttack and registerAttack.FireServer then
                 pcall(registerAttack.FireServer, registerAttack)
             end
             
-            -- LeftClickRemote
             local leftClick = remotes:FindFirstChild("LeftClickRemote")
             if leftClick and leftClick.FireServer then
                 pcall(leftClick.FireServer, leftClick)
@@ -511,7 +426,6 @@ end
 -- 饰品/戒指系统
 -- ============================================================
 
--- 读取饰品数据
 local function readTrinket(item)
     if not item then return nil end
     
@@ -524,7 +438,6 @@ local function readTrinket(item)
     }
 end
 
--- 获取所有饰品
 local function getTrinkets()
     local player = getPlayer()
     if not player then return {} end
@@ -543,6 +456,79 @@ local function getTrinkets()
     end
     
     return trinkets
+end
+
+-- ============================================================
+-- 难度设置
+-- ============================================================
+
+local function setDifficulty(difficulty)
+    local replicatedStorage = getReplicatedStorage()
+    if not replicatedStorage then return end
+    
+    local settings = replicatedStorage:FindFirstChild("DungeonSettingsChanged")
+    if settings and settings.FireServer then
+        pcall(settings.FireServer, settings, difficulty or Config.Difficulty)
+    end
+end
+
+-- ============================================================
+-- Webhook 系统
+-- ============================================================
+
+local function sendWebhook(data)
+    if not Config.WebhookUrl or Config.WebhookUrl == "" then
+        return
+    end
+    
+    local success, err = pcall(function()
+        local requestFunc = syn and syn.request or http and http.request or request
+        if not requestFunc then return end
+        
+        requestFunc({
+            Url = Config.WebhookUrl,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = game:GetService("HttpService"):JSONEncode(data)
+        })
+    end)
+    
+    return success
+end
+
+local function sendTrinketsReport()
+    local trinkets = getTrinkets()
+    if #trinkets == 0 then return end
+    
+    local player = getPlayer()
+    local embed = {
+        title = "Dungeon Trinket Report",
+        color = 16763904,
+        fields = {},
+        footer = {
+            text = "BananaCatHub AutoDungeon"
+        }
+    }
+    
+    for i, trinket in ipairs(trinkets) do
+        if i > 25 then break end
+        local modifiers = table.concat(trinket.Modifiers or {}, ", ")
+        if modifiers == "" then modifiers = "None"
+        
+        table.insert(embed.fields, {
+            name = trinket.Name,
+            value = string.format("Grade: %d | Modifiers: %s", trinket.Grade or 0, modifiers),
+            inline = true
+        })
+    end
+    
+    sendWebhook({
+        username = player.Name,
+        avatar_url = "https://img.ws.mms.shopee.co.id/id-11134233-7qul2-ljrdxepwm42j36",
+        embeds = { embed }
+    })
 end
 
 -- ============================================================
@@ -567,13 +553,11 @@ local function createStatusUI()
     local playerGui = player:FindFirstChild("PlayerGui")
     if not playerGui then return nil end
     
-    -- 创建 UI
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "BananaCatHub"
     screenGui.ResetOnSpawn = false
     screenGui.Parent = playerGui
     
-    -- 主框架
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(0, 320, 0, 150)
     frame.Position = UDim2.new(0, 10, 0, 10)
@@ -587,7 +571,6 @@ local function createStatusUI()
     corner.CornerRadius = UDim.new(0, 12)
     corner.Parent = frame
     
-    -- 标题
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, -20, 0, 30)
     title.Position = UDim2.new(0, 10, 0, 8)
@@ -599,7 +582,6 @@ local function createStatusUI()
     title.TextXAlignment = Enum.TextXAlignment.Left
     title.Parent = frame
     
-    -- 状态
     local status = Instance.new("TextLabel")
     status.Size = UDim2.new(1, -20, 0, 28)
     status.Position = UDim2.new(0, 10, 0, 42)
@@ -611,7 +593,6 @@ local function createStatusUI()
     status.TextXAlignment = Enum.TextXAlignment.Left
     status.Parent = frame
     
-    -- 详情
     local detail = Instance.new("TextLabel")
     detail.Size = UDim2.new(1, -20, 0, 24)
     detail.Position = UDim2.new(0, 10, 0, 72)
@@ -623,7 +604,6 @@ local function createStatusUI()
     detail.TextXAlignment = Enum.TextXAlignment.Left
     detail.Parent = frame
     
-    -- 进度条背景
     local progressBg = Instance.new("Frame")
     progressBg.Size = UDim2.new(0.9, 0, 0, 4)
     progressBg.Position = UDim2.new(0.05, 0, 1, -16)
@@ -635,7 +615,6 @@ local function createStatusUI()
     progressCorner.CornerRadius = UDim.new(0, 2)
     progressCorner.Parent = progressBg
     
-    -- 进度条
     local progress = Instance.new("Frame")
     progress.Size = UDim2.new(0, 0, 1, 0)
     progress.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
@@ -688,7 +667,6 @@ local function createStatusUI()
     return statusUI
 end
 
--- UI 函数
 local function setStatus(text, color)
     if statusUI then
         statusUI:SetStatus(text, color)
@@ -731,7 +709,8 @@ local function farmDungeon()
             if not character then return end
         end
         
-        -- 检查能量
+        setDifficulty(Config.Difficulty)
+        
         local energy = getEnergy()
         if energy < 1 then
             setStatus("Not enough Energy", Color3.fromRGB(255, 100, 100))
@@ -740,11 +719,9 @@ local function farmDungeon()
             return
         end
         
-        -- 选择武器
         setStatus("Selecting weapon...", Color3.fromRGB(255, 200, 100))
-        switchWeapon(Config.PreferredWeapon)
+        switchWeapon()
         
-        -- 找 Pad
         setStatus("Finding pad...", Color3.fromRGB(255, 200, 100))
         local pad = findNearestPad()
         if not pad then
@@ -753,12 +730,10 @@ local function farmDungeon()
             return
         end
         
-        -- 进入 Pad
         setStatus("Entering pad...", Color3.fromRGB(255, 200, 100))
         setDetail("Moving to pad")
         enterPad(pad)
         
-        -- 等待地牢开始
         setStatus("Waiting for dungeon...", Color3.fromRGB(255, 200, 100))
         setDetail("Waiting for dungeon to start...")
         setProgress(0.3)
@@ -770,15 +745,13 @@ local function farmDungeon()
             return
         end
         
-        -- Farming 循环
         setStatus("⚔️ Farming Dungeon", Color3.fromRGB(100, 255, 100))
         setProgress(0.5)
         
         local startTime = tick()
-        local maxDuration = 600 -- 10 分钟
+        local maxDuration = 600
         
         while isInDungeon() and tick() - startTime < maxDuration and not stopFarming do
-            -- 找最近的敌人
             local enemy = findNearestEnemy()
             if enemy then
                 setDetail("Attacking enemy...")
@@ -788,7 +761,6 @@ local function farmDungeon()
                 moveToCenter()
             end
             
-            -- 检查能量
             local currentEnergy = getEnergy()
             if currentEnergy < 1 then
                 setStatus("Out of energy!", Color3.fromRGB(255, 100, 100))
@@ -800,7 +772,6 @@ local function farmDungeon()
             task.wait(0.1)
         end
         
-        -- 完成
         if stopFarming then
             setStatus("Stopped", Color3.fromRGB(255, 200, 100))
             setDetail("Farming stopped")
@@ -808,6 +779,10 @@ local function farmDungeon()
             setStatus("✅ Dungeon Complete", Color3.fromRGB(100, 255, 100))
             setDetail("Farming session finished")
             setProgress(1)
+            
+            if Config.WebhookUrl and Config.WebhookUrl ~= "" then
+                pcall(sendTrinketsReport)
+            end
         end
         
         task.wait(2)
@@ -837,21 +812,31 @@ local function mainLoop()
 end
 
 -- ============================================================
+-- Webhook 循环
+-- ============================================================
+
+local function webhookLoop()
+    while not stopFarming do
+        if Config.WebhookUrl and Config.WebhookUrl ~= "" then
+            pcall(sendTrinketsReport)
+        end
+        task.wait(Config.WebhookInterval or 300)
+    end
+end
+
+-- ============================================================
 -- 启动函数
 -- ============================================================
 
 local function start()
-    -- 创建 UI
     createStatusUI()
     setStatus("Starting...", Color3.fromRGB(255, 200, 100))
     setDetail("Initializing farming bot")
     setProgress(0.1)
     
-    -- 等待游戏加载
     setDetail("Waiting for game...")
     waitFor(function() return game:IsLoaded() end, 60)
     
-    -- 等待玩家
     setDetail("Waiting for player...")
     waitFor(function() 
         local player = getPlayer()
@@ -863,15 +848,19 @@ local function start()
     setDetail("Starting farming loop...")
     setProgress(0.5)
     
-    -- 启动主循环
     task.spawn(mainLoop)
+    
+    if Config.WebhookUrl and Config.WebhookUrl ~= "" then
+        task.spawn(webhookLoop)
+    end
     
     setStatus("🟢 Running", Color3.fromRGB(100, 255, 100))
     setDetail("Farming dungeons...")
     setProgress(1)
     
     print("[BananaCatHub] Started successfully!")
-    print("[BananaCatHub] Config:", Config)
+    print("[BananaCatHub] Difficulty:", Config.Difficulty)
+    print("[BananaCatHub] MinGradeToLock:", Config.MinGradeToLock)
 end
 
 local function stop()
@@ -896,8 +885,7 @@ end
 -- 自动启动
 -- ============================================================
 
--- 如果全局配置启用了自动启动
-if getgenv() and getgenv().AutoFarm then
+if Config.AutoLoad then
     task.spawn(start)
 end
 
@@ -915,4 +903,5 @@ return {
     GetWeapons = getWeapons,
     GetBestWeapon = getBestWeapon,
     FarmDungeon = farmDungeon,
+    SetDifficulty = setDifficulty,
 }
