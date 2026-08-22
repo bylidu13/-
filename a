@@ -1,0 +1,918 @@
+-- ============================================================
+-- BananaCatHub - Dungeon Farming Script (无密钥版)
+-- 完全本地运行，无需服务器验证
+-- ============================================================
+
+-- ============================================================
+-- 配置系统
+-- ============================================================
+local Config = {
+    -- 要 farming 的戒指列表（留空则 farming 所有）
+    FarmRings = {},
+    
+    -- 白名单戒指（留空则不过滤）
+    WhitelistRings = {},
+    
+    -- 白名单修饰符（留空则不过滤）
+    WhitelistModifiers = {},
+    
+    -- 锁定最小等级（低于此等级的不 farming）
+    MinGradeToLock = 0,
+    
+    -- 主账号名称
+    MainAccount = "",
+    
+    -- 小号列表
+    Alts = {},
+    
+    -- 显示状态 UI
+    ShowStatus = true,
+    
+    -- 武器偏好
+    PreferredWeapon = "Auto", -- Auto, Sword, Melee, Fruit, Lifesteal, Hyper
+}
+
+-- ============================================================
+-- 工具函数
+-- ============================================================
+
+-- 安全 pcall 包装
+local function safeCall(func, ...)
+    local success, result = pcall(func, ...)
+    if not success then
+        warn("[BananaCatHub] Error: " .. tostring(result))
+        return nil
+    end
+    return result
+end
+
+-- 等待条件
+local function waitFor(condition, timeout, interval)
+    timeout = timeout or 30
+    interval = interval or 0.1
+    local start = tick()
+    while tick() - start < timeout do
+        if condition() then
+            return true
+        end
+        task.wait(interval)
+    end
+    return false
+end
+
+-- ============================================================
+-- 游戏对象获取
+-- ============================================================
+
+local function getPlayer()
+    return game:GetService("Players").LocalPlayer
+end
+
+local function getCharacter()
+    local player = getPlayer()
+    if not player then return nil end
+    return player.Character
+end
+
+local function getHumanoid()
+    local character = getCharacter()
+    if not character then return nil end
+    return character:FindFirstChildOfClass("Humanoid")
+end
+
+local function getHumanoidRootPart()
+    local character = getCharacter()
+    if not character then return nil end
+    return character:FindFirstChild("HumanoidRootPart")
+end
+
+local function getReplicatedStorage()
+    return game:GetService("ReplicatedStorage")
+end
+
+local function getRunService()
+    return game:GetService("RunService")
+end
+
+-- ============================================================
+-- 武器检测系统
+-- ============================================================
+
+-- 检测武器类型
+local function detectWeaponType(item)
+    if not item then return "Unknown" end
+    
+    local name = item.Name:lower()
+    
+    -- 通过属性检测
+    local weaponType = item:GetAttribute("WeaponType")
+    if weaponType and weaponType ~= "" then
+        local wt = weaponType:lower()
+        if wt:find("sword") or wt:find("blade") then
+            return "Sword"
+        elseif wt:find("fruit") or wt:find("blox") then
+            return "Fruit"
+        elseif wt:find("lifesteal") or wt:find("life") then
+            return "Lifesteal"
+        elseif wt:find("hyper") then
+            return "Hyper"
+        elseif wt:find("melee") or wt:find("fist") then
+            return "Melee"
+        end
+    end
+    
+    -- 通过名称检测
+    if name:find("sword") or name:find("blade") or name:find("katana") or name:find("cutlass") then
+        return "Sword"
+    elseif name:find("fruit") or name:find("blox") or name:find("demon") or name:find("flame") then
+        return "Fruit"
+    elseif name:find("lifesteal") or name:find("life steal") or name:find("leech") or name:find("vamp") then
+        return "Lifesteal"
+    elseif name:find("hyper") or name:find("super") or name:find("ultra") then
+        return "Hyper"
+    else
+        return "Melee"
+    end
+end
+
+-- 获取 M1 速度
+local function getM1Speed(item)
+    if not item then return 0 end
+    
+    local speed = item:GetAttribute("M1Speed") or item:GetAttribute("m1Speed") or 0
+    if speed == 0 then
+        -- 根据武器类型估算
+        local weaponType = detectWeaponType(item)
+        local estimates = {
+            Hyper = 2.0,
+            Fruit = 1.8,
+            Sword = 1.5,
+            Lifesteal = 1.3,
+            Melee = 1.0,
+        }
+        speed = estimates[weaponType] or 1.0
+    end
+    return speed
+end
+
+-- 获取背包中的所有武器
+local function getWeapons()
+    local player = getPlayer()
+    if not player then return {} end
+    
+    local backpack = player:FindFirstChild("Backpack")
+    if not backpack then return {} end
+    
+    local weapons = {}
+    for _, item in ipairs(backpack:GetChildren()) do
+        if item:IsA("Tool") then
+            table.insert(weapons, item)
+        end
+    end
+    
+    return weapons
+end
+
+-- 获取最佳武器
+local function getBestWeapon(preference)
+    local weapons = getWeapons()
+    if #weapons == 0 then return nil end
+    
+    local best = nil
+    local bestScore = -1
+    
+    -- 武器类型评分
+    local typeScores = {
+        Hyper = 100,
+        Fruit = 80,
+        Sword = 60,
+        Lifesteal = 50,
+        Melee = 30,
+    }
+    
+    -- 如果有偏好，调整评分
+    if preference and preference ~= "Auto" then
+        for k in pairs(typeScores) do
+            typeScores[k] = typeScores[k] / 2
+        end
+        typeScores[preference] = typeScores[preference] * 2
+    end
+    
+    for _, weapon in ipairs(weapons) do
+        local weaponType = detectWeaponType(weapon)
+        local m1Speed = getM1Speed(weapon)
+        local typeScore = typeScores[weaponType] or 10
+        
+        -- 总评分 = M1速度 + 类型加成
+        local score = m1Speed * 50 + typeScore
+        
+        -- 检查是否已装备
+        if weapon.Parent == getCharacter() then
+            score = score + 50
+        end
+        
+        if score > bestScore then
+            bestScore = score
+            best = weapon
+        end
+    end
+    
+    return best
+end
+
+-- 装备武器
+local function equipWeapon(weapon)
+    if not weapon then return false end
+    
+    local player = getPlayer()
+    local character = getCharacter()
+    if not character then return false end
+    
+    -- 如果已经装备，直接返回
+    if weapon.Parent == character then
+        return true
+    end
+    
+    -- 卸下所有武器
+    for _, tool in ipairs(character:GetChildren()) do
+        if tool:IsA("Tool") then
+            tool.Parent = player.Backpack
+        end
+    end
+    
+    -- 装备新武器
+    weapon.Parent = character
+    task.wait(0.3)
+    return true
+end
+
+-- 切换武器
+local function switchWeapon(preference)
+    local best = getBestWeapon(preference)
+    if best then
+        return equipWeapon(best)
+    end
+    return false
+end
+
+-- ============================================================
+-- 能量系统
+-- ============================================================
+
+local function getEnergy()
+    local character = getCharacter()
+    if not character then return 0 end
+    
+    -- 尝试获取 RaceEnergy
+    local energy = character:FindFirstChild("RaceEnergy")
+    if energy and energy.Value then
+        return energy.Value
+    end
+    
+    -- 尝试通过 Remote 获取
+    local replicatedStorage = getReplicatedStorage()
+    if replicatedStorage then
+        local modules = replicatedStorage:FindFirstChild("Modules")
+        if modules then
+            local net = modules:FindFirstChild("Net")
+            if net then
+                local dungeonNPC = net:FindFirstChild("RF/DungeonNPCNetworkFunction")
+                if dungeonNPC and dungeonNPC.InvokeServer then
+                    local success, result = pcall(dungeonNPC.InvokeServer, dungeonNPC, "GetDungeonEnergy")
+                    if success and result then
+                        return result
+                    end
+                end
+            end
+        end
+    end
+    
+    return 0
+end
+
+-- ============================================================
+-- Pad 系统
+-- ============================================================
+
+-- 查找所有 Pad
+local function findPads()
+    local workspace = game:GetService("Workspace")
+    local pads = {}
+    
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local name = obj.Name:lower()
+            if name:find("pad") or name:find("platform") or name:find("teleport") then
+                -- 检查是否可交互
+                if obj.CanTouch ~= false then
+                    table.insert(pads, obj)
+                end
+            end
+        end
+    end
+    
+    return pads
+end
+
+-- 找最近的 Pad
+local function findNearestPad()
+    local rootPart = getHumanoidRootPart()
+    if not rootPart then return nil end
+    
+    local pads = findPads()
+    if #pads == 0 then return nil end
+    
+    table.sort(pads, function(a, b)
+        local distA = (a.Position - rootPart.Position).Magnitude
+        local distB = (b.Position - rootPart.Position).Magnitude
+        return distA < distB
+    end)
+    
+    return pads[1]
+end
+
+-- 进入 Pad
+local function enterPad(pad)
+    if not pad then return false end
+    
+    local rootPart = getHumanoidRootPart()
+    if not rootPart then return false end
+    
+    -- 移动到 Pad
+    rootPart.CFrame = pad.CFrame + Vector3.new(0, 3, 0)
+    task.wait(0.3)
+    
+    -- 尝试触发触摸
+    local function fireTouch(part)
+        if firetouchinterest then
+            firetouchinterest(rootPart, part, 0)
+            task.wait(0.05)
+            firetouchinterest(rootPart, part, 1)
+        end
+    end
+    
+    -- 触发所有子部件
+    for _, part in ipairs(pad:GetDescendants()) do
+        if part:IsA("BasePart") then
+            pcall(fireTouch, part)
+        end
+    end
+    
+    return true
+end
+
+-- ============================================================
+-- 地牢检测
+-- ============================================================
+
+local function isInDungeon()
+    local character = getCharacter()
+    if not character then return false end
+    
+    -- 检查是否有地牢标记
+    if character:FindFirstChild("DungeonLua") then
+        return true
+    end
+    
+    -- 检查 workspace
+    local workspace = game:GetService("Workspace")
+    if workspace:FindFirstChild("Dungeon") then
+        return true
+    end
+    
+    -- 检查是否有敌人
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and obj.Name:lower():find("enemy") then
+            return true
+        end
+    end
+    
+    return false
+end
+
+-- 等待地牢开始
+local function waitForDungeonStart(timeout)
+    timeout = timeout or 30
+    return waitFor(function()
+        return isInDungeon()
+    end, timeout)
+end
+
+-- ============================================================
+-- 敌人系统
+-- ============================================================
+
+-- 查找敌人
+local function findEnemies()
+    local workspace = game:GetService("Workspace")
+    local enemies = {}
+    
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local name = obj.Name:lower()
+            if name:find("enemy") or name:find("mob") or name:find("zombie") or 
+               name:find("skeleton") or name:find("boss") or name:find("monster") then
+                local parent = obj.Parent
+                if parent then
+                    local humanoid = parent:FindFirstChildOfClass("Humanoid")
+                    if humanoid and humanoid.Health > 0 then
+                        table.insert(enemies, {
+                            Part = obj,
+                            Humanoid = humanoid,
+                            Position = obj.Position
+                        })
+                    end
+                end
+            end
+        end
+    end
+    
+    return enemies
+end
+
+-- 找最近的敌人
+local function findNearestEnemy()
+    local rootPart = getHumanoidRootPart()
+    if not rootPart then return nil end
+    
+    local enemies = findEnemies()
+    if #enemies == 0 then return nil end
+    
+    table.sort(enemies, function(a, b)
+        local distA = (a.Position - rootPart.Position).Magnitude
+        local distB = (b.Position - rootPart.Position).Magnitude
+        return distA < distB
+    end)
+    
+    return enemies[1]
+end
+
+-- 攻击敌人
+local function attackEnemy(enemyData)
+    if not enemyData then return false end
+    
+    local character = getCharacter()
+    local rootPart = getHumanoidRootPart()
+    if not character or not rootPart then return false end
+    
+    local enemyPart = enemyData.Part
+    if not enemyPart then return false end
+    
+    -- 面向敌人
+    local direction = (enemyPart.Position - rootPart.Position).Unit
+    rootPart.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + direction * 10)
+    
+    -- 发送攻击事件
+    local replicatedStorage = getReplicatedStorage()
+    if replicatedStorage then
+        local remotes = replicatedStorage:FindFirstChild("Remotes")
+        if remotes then
+            -- RegisterHit
+            local registerHit = remotes:FindFirstChild("RE/RegisterHit")
+            if registerHit and registerHit.FireServer then
+                pcall(registerHit.FireServer, registerHit, enemyPart)
+            end
+            
+            -- RegisterAttack
+            local registerAttack = remotes:FindFirstChild("RE/RegisterAttack")
+            if registerAttack and registerAttack.FireServer then
+                pcall(registerAttack.FireServer, registerAttack)
+            end
+            
+            -- LeftClickRemote
+            local leftClick = remotes:FindFirstChild("LeftClickRemote")
+            if leftClick and leftClick.FireServer then
+                pcall(leftClick.FireServer, leftClick)
+            end
+        end
+    end
+    
+    return true
+end
+
+-- ============================================================
+-- 移动系统
+-- ============================================================
+
+local function moveTo(position)
+    local rootPart = getHumanoidRootPart()
+    if not rootPart then return false end
+    
+    rootPart.CFrame = CFrame.new(position)
+    task.wait(0.1)
+    return true
+end
+
+local function moveToCenter()
+    return moveTo(Vector3.new(0, 0, 0))
+end
+
+-- ============================================================
+-- 饰品/戒指系统
+-- ============================================================
+
+-- 读取饰品数据
+local function readTrinket(item)
+    if not item then return nil end
+    
+    return {
+        Name = item.Name or "Unknown",
+        Grade = item:GetAttribute("Grade") or 0,
+        Type = item:GetAttribute("Type") or "Unknown",
+        Modifiers = item:GetAttribute("Modifiers") or {},
+        IsEquipped = item:GetAttribute("IS_EQUIPPED") or false,
+    }
+end
+
+-- 获取所有饰品
+local function getTrinkets()
+    local player = getPlayer()
+    if not player then return {} end
+    
+    local backpack = player:FindFirstChild("Backpack")
+    if not backpack then return {} end
+    
+    local trinkets = {}
+    for _, item in ipairs(backpack:GetChildren()) do
+        if item:GetAttribute("Type") then
+            local trinket = readTrinket(item)
+            if trinket then
+                table.insert(trinkets, trinket)
+            end
+        end
+    end
+    
+    return trinkets
+end
+
+-- ============================================================
+-- 状态 UI 系统
+-- ============================================================
+
+local statusUI = nil
+
+local function createStatusUI()
+    if statusUI then
+        pcall(statusUI.Destroy)
+        statusUI = nil
+    end
+    
+    if not Config.ShowStatus then
+        return nil
+    end
+    
+    local player = getPlayer()
+    if not player then return nil end
+    
+    local playerGui = player:FindFirstChild("PlayerGui")
+    if not playerGui then return nil end
+    
+    -- 创建 UI
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "BananaCatHub"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = playerGui
+    
+    -- 主框架
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 320, 0, 150)
+    frame.Position = UDim2.new(0, 10, 0, 10)
+    frame.BackgroundColor3 = Color3.fromRGB(20, 20, 35)
+    frame.BackgroundTransparency = 0.15
+    frame.BorderSizePixel = 0
+    frame.ClipsDescendants = true
+    frame.Parent = screenGui
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = frame
+    
+    -- 标题
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -20, 0, 30)
+    title.Position = UDim2.new(0, 10, 0, 8)
+    title.BackgroundTransparency = 1
+    title.Text = "🍌 BananaCatHub"
+    title.TextColor3 = Color3.fromRGB(255, 200, 50)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 18
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = frame
+    
+    -- 状态
+    local status = Instance.new("TextLabel")
+    status.Size = UDim2.new(1, -20, 0, 28)
+    status.Position = UDim2.new(0, 10, 0, 42)
+    status.BackgroundTransparency = 1
+    status.Text = "Ready"
+    status.TextColor3 = Color3.fromRGB(255, 255, 255)
+    status.Font = Enum.Font.Gotham
+    status.TextSize = 16
+    status.TextXAlignment = Enum.TextXAlignment.Left
+    status.Parent = frame
+    
+    -- 详情
+    local detail = Instance.new("TextLabel")
+    detail.Size = UDim2.new(1, -20, 0, 24)
+    detail.Position = UDim2.new(0, 10, 0, 72)
+    detail.BackgroundTransparency = 1
+    detail.Text = "Initializing..."
+    detail.TextColor3 = Color3.fromRGB(180, 180, 210)
+    detail.Font = Enum.Font.Gotham
+    detail.TextSize = 13
+    detail.TextXAlignment = Enum.TextXAlignment.Left
+    detail.Parent = frame
+    
+    -- 进度条背景
+    local progressBg = Instance.new("Frame")
+    progressBg.Size = UDim2.new(0.9, 0, 0, 4)
+    progressBg.Position = UDim2.new(0.05, 0, 1, -16)
+    progressBg.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+    progressBg.BorderSizePixel = 0
+    progressBg.Parent = frame
+    
+    local progressCorner = Instance.new("UICorner")
+    progressCorner.CornerRadius = UDim.new(0, 2)
+    progressCorner.Parent = progressBg
+    
+    -- 进度条
+    local progress = Instance.new("Frame")
+    progress.Size = UDim2.new(0, 0, 1, 0)
+    progress.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+    progress.BorderSizePixel = 0
+    progress.Parent = progressBg
+    
+    local progressCorner2 = Instance.new("UICorner")
+    progressCorner2.CornerRadius = UDim.new(0, 2)
+    progressCorner2.Parent = progress
+    
+    statusUI = {
+        ScreenGui = screenGui,
+        Frame = frame,
+        StatusLabel = status,
+        DetailLabel = detail,
+        ProgressBar = progress,
+        ProgressBg = progressBg,
+        
+        SetStatus = function(text, color)
+            status.Text = text or "Idle"
+            if color then
+                status.TextColor3 = color
+            else
+                status.TextColor3 = Color3.fromRGB(255, 255, 255)
+            end
+        end,
+        
+        SetDetail = function(text)
+            detail.Text = text or ""
+        end,
+        
+        SetProgress = function(value)
+            local clamped = math.clamp(value or 0, 0, 1)
+            progress.Size = UDim2.new(clamped, 0, 1, 0)
+            if clamped >= 1 then
+                progress.BackgroundColor3 = Color3.fromRGB(100, 255, 150)
+            else
+                progress.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+            end
+        end,
+        
+        Destroy = function()
+            pcall(function()
+                screenGui:Destroy()
+            end)
+            statusUI = nil
+        end
+    }
+    
+    return statusUI
+end
+
+-- UI 函数
+local function setStatus(text, color)
+    if statusUI then
+        statusUI:SetStatus(text, color)
+    end
+end
+
+local function setDetail(text)
+    if statusUI then
+        statusUI:SetDetail(text)
+    end
+end
+
+local function setProgress(value)
+    if statusUI then
+        statusUI:SetProgress(value)
+    end
+end
+
+-- ============================================================
+-- 主 Farming 循环
+-- ============================================================
+
+local isFarming = false
+local stopFarming = false
+
+local function farmDungeon()
+    if stopFarming then return end
+    if isFarming then return end
+    isFarming = true
+    
+    local success, err = pcall(function()
+        local player = getPlayer()
+        if not player then return end
+        
+        local character = getCharacter()
+        if not character then
+            setStatus("Waiting for character...", Color3.fromRGB(255, 200, 100))
+            waitFor(function() return getCharacter() ~= nil end, 10)
+            character = getCharacter()
+            if not character then return end
+        end
+        
+        -- 检查能量
+        local energy = getEnergy()
+        if energy < 1 then
+            setStatus("Not enough Energy", Color3.fromRGB(255, 100, 100))
+            setDetail("Energy: " .. tostring(energy))
+            task.wait(2)
+            return
+        end
+        
+        -- 选择武器
+        setStatus("Selecting weapon...", Color3.fromRGB(255, 200, 100))
+        switchWeapon(Config.PreferredWeapon)
+        
+        -- 找 Pad
+        setStatus("Finding pad...", Color3.fromRGB(255, 200, 100))
+        local pad = findNearestPad()
+        if not pad then
+            setStatus("No pad found!", Color3.fromRGB(255, 100, 100))
+            task.wait(2)
+            return
+        end
+        
+        -- 进入 Pad
+        setStatus("Entering pad...", Color3.fromRGB(255, 200, 100))
+        setDetail("Moving to pad")
+        enterPad(pad)
+        
+        -- 等待地牢开始
+        setStatus("Waiting for dungeon...", Color3.fromRGB(255, 200, 100))
+        setDetail("Waiting for dungeon to start...")
+        setProgress(0.3)
+        
+        if not waitForDungeonStart(30) then
+            setStatus("Dungeon timeout", Color3.fromRGB(255, 100, 100))
+            setDetail("Dungeon didn't start")
+            task.wait(2)
+            return
+        end
+        
+        -- Farming 循环
+        setStatus("⚔️ Farming Dungeon", Color3.fromRGB(100, 255, 100))
+        setProgress(0.5)
+        
+        local startTime = tick()
+        local maxDuration = 600 -- 10 分钟
+        
+        while isInDungeon() and tick() - startTime < maxDuration and not stopFarming do
+            -- 找最近的敌人
+            local enemy = findNearestEnemy()
+            if enemy then
+                setDetail("Attacking enemy...")
+                attackEnemy(enemy)
+            else
+                setDetail("Searching for enemies...")
+                moveToCenter()
+            end
+            
+            -- 检查能量
+            local currentEnergy = getEnergy()
+            if currentEnergy < 1 then
+                setStatus("Out of energy!", Color3.fromRGB(255, 100, 100))
+                setDetail("Energy depleted")
+                task.wait(1)
+                break
+            end
+            
+            task.wait(0.1)
+        end
+        
+        -- 完成
+        if stopFarming then
+            setStatus("Stopped", Color3.fromRGB(255, 200, 100))
+            setDetail("Farming stopped")
+        else
+            setStatus("✅ Dungeon Complete", Color3.fromRGB(100, 255, 100))
+            setDetail("Farming session finished")
+            setProgress(1)
+        end
+        
+        task.wait(2)
+    end)
+    
+    if not success then
+        warn("[BananaCatHub] Farming error: " .. tostring(err))
+        setStatus("Error", Color3.fromRGB(255, 50, 50))
+        setDetail(tostring(err):sub(1, 50))
+        task.wait(3)
+    end
+    
+    isFarming = false
+end
+
+-- ============================================================
+-- 主循环
+-- ============================================================
+
+local function mainLoop()
+    while not stopFarming do
+        if not isFarming then
+            safeCall(farmDungeon)
+        end
+        task.wait(3)
+    end
+end
+
+-- ============================================================
+-- 启动函数
+-- ============================================================
+
+local function start()
+    -- 创建 UI
+    createStatusUI()
+    setStatus("Starting...", Color3.fromRGB(255, 200, 100))
+    setDetail("Initializing farming bot")
+    setProgress(0.1)
+    
+    -- 等待游戏加载
+    setDetail("Waiting for game...")
+    waitFor(function() return game:IsLoaded() end, 60)
+    
+    -- 等待玩家
+    setDetail("Waiting for player...")
+    waitFor(function() 
+        local player = getPlayer()
+        return player and player.Character
+    end, 30)
+    
+    setProgress(0.3)
+    setStatus("Ready", Color3.fromRGB(100, 255, 100))
+    setDetail("Starting farming loop...")
+    setProgress(0.5)
+    
+    -- 启动主循环
+    task.spawn(mainLoop)
+    
+    setStatus("🟢 Running", Color3.fromRGB(100, 255, 100))
+    setDetail("Farming dungeons...")
+    setProgress(1)
+    
+    print("[BananaCatHub] Started successfully!")
+    print("[BananaCatHub] Config:", Config)
+end
+
+local function stop()
+    stopFarming = true
+    if statusUI then
+        statusUI:SetStatus("Stopped", Color3.fromRGB(255, 200, 100))
+        statusUI:SetDetail("Farming stopped by user")
+    end
+    print("[BananaCatHub] Stopped")
+end
+
+local function destroy()
+    stopFarming = true
+    isFarming = false
+    if statusUI then
+        statusUI:Destroy()
+    end
+    print("[BananaCatHub] Destroyed")
+end
+
+-- ============================================================
+-- 自动启动
+-- ============================================================
+
+-- 如果全局配置启用了自动启动
+if getgenv() and getgenv().AutoFarm then
+    task.spawn(start)
+end
+
+-- ============================================================
+-- 导出
+-- ============================================================
+
+return {
+    Config = Config,
+    Start = start,
+    Stop = stop,
+    Destroy = destroy,
+    GetTrinkets = getTrinkets,
+    GetEnergy = getEnergy,
+    GetWeapons = getWeapons,
+    GetBestWeapon = getBestWeapon,
+    FarmDungeon = farmDungeon,
+}
